@@ -1,0 +1,293 @@
+<style>
+.rcode table{
+  border: 2px solid black;
+  border-collapse:collapse;
+}
+.rcode tr:nth-child(even){
+  background-color:#ddd;
+}
+.rcode td:first-child{
+  padding-right:6px;
+  font-weight:bold;
+}
+.rcode td{
+  padding:4px;
+}
+/*caption isn't that useful since all the tables are the same...'*/
+caption{
+  display:none;
+  text-align:left;
+  font-size:8px;
+}
+</style>
+
+
+<!--begin.rcode echo=FALSE, message=FALSE, warning=FALSE
+source('generative_model.r')
+end.rcode-->
+
+<p> When working with data, oftentimes one may want to cluster data into different groups based on features. Clustering data involves assigning a group label to each element of a data set (usually row, but possibly factor levels of one or more columns), usually based on either a distance function from a group "centroid" or a probability distribution describing a group. There could be several reasons for this: </p>
+
+<ol>
+<li> The features are high-dimensional and you would like to reduce the dimensionality </li>
+<li> Possibly because the features are high-dimensional, you would like to perform another task (such as visualization, regression, or even more clustering with different features) on each individual cluster. </li>
+<li> You want to use the clustering criteria to determine what makes different groups the most different </li>
+<li> You want to know what rows/objects are most similar to each other </li>
+</ol>
+
+<p> Common examples of the above are </p>
+
+<ol>
+<!--
+<li> You have a dataset with hundreds of categorical columns, many with hundreds or thousands of possible labels. You can cluster the possible levels of these columns based on these criteria:
+ <ul> 
+ <li> How many times a particular level appears overall </li>
+ <li> The average value of some numeric variable in the same row as a particular level </li>
+ <li> How frequently that level is associated with a missing value in another column </li>
+ </ul>
+</li>-->
+<li> You have a bunch of keywords describing documents, and you want to use a document's "topic" as a feature in a regression (e.g., how popular is a document based on topic, word count, publication date, etc.?). The topic can only be inferred using clustering methodology in cases without any pre-assigned labels.</li>
+<li> You have a bunch of keywords describing documents, and you would like to create a different model for each topic, since you believe the features are too dissimilar in underlying structure across different topics. </li>
+<li> You have a bunch of keywords describing documents, and you want to know what keywords contribute to a document being placed in a particular topic. </li>
+<li> You have a bunch of keywords describing documents, and you want to recommend similar documents to a user viewing one of them. </li>
+</ol>
+
+<p> Any of the above can also be true for datasets involving numeric variables, which is what I will focus on below with a particular method of clustering known as the <a href="https://en.wikipedia.org/wiki/Expectation%E2%80%93maximization_algorithm" target="_blank" id="wiki_em_algorithm_out">expectation-maximization algorithm</a>. This algorithm essentially involves these steps: </p>
+
+<ol>
+<li> Select a number of clusters, and randomly assign a cluster to each row of the data </li>
+<li> For each cluster, estimate a distribution/centroid based on pre-selected features </li>
+<li> For each row of data, reassign the cluster with the highest probability (density) or smallest distance to a centroid </li>
+<li> Repeat steps 2-3 until the cluster assignments are stable/a pre-determined maximum number of iterations have been reached </li>
+</ol>
+
+<p> Here is an example of an algorithm in action using two variables in a graph from the classic Iris dataset:</p>
+
+<div id="iris_gif_div">
+
+<!--begin.rcode example_clustering_animation, fig.width=6, fig.height=6, warning=FALSE, message=FALSE
+source('generative_model.r')
+require(gganimate)
+require(ggplot2)
+set.seed(2018)
+iris.model_free_simple = generative_model(iris, variables=names(iris)[3:4], n_groups=2, 
+                                   covariance_constraint='free', 
+                                   record_history=TRUE, 
+                                   include_data_copy=TRUE, 
+                                   n_iter=30,
+                                   prior_smoothing_constant = 0.1)
+hf = create_history_frame(iris.model_free_simple)
+p = ggplot(hf, aes(x=Petal.Length, y=Petal.Width, color=factor(group), frame=factor(iteration))) + 
+  geom_point() + ggtitle('Clustering of Iris data: Iteration #') + 
+  stat_ellipse(geom='polygon', aes(fill=factor(group)), alpha=0.5 )
+gganimate(p, title_frame=TRUE, filename='figure/simple_example.gif',saver='gif')
+
+end.rcode-->
+<img src="figure/simple_example.gif" id="simple_animated_example_img" alt="animated clustering"/>
+</div>
+
+<p> As you can see, initially, the initial designations are completely random, but the algorithm is able to detect two separate clusters, describing each as a <a href="https://en.wikipedia.org/wiki/Multivariate_normal_distribution" id="wiki_multivariate_normal_out" target="_blank">multivariate normal distribution</a>. This type of distribution is good for detecting clusters that are centered around ellipsoid shapes at arbitrary angles.</p>
+
+<p> One should also note that some data/number of cluster combinations are not stable, and depend on what the initial cluster assignments are. The more  unstable a combination is, the less likely that either of the following are true:</p>
+
+<ol>
+<li> The number of clusters is appropriate for the data and algorithm </li>
+<li> You are using an appropriate algorithm for clustering the data (if it can even be clustered) </li>
+</ol>
+
+<h2> Clustering to Detect Underlying Structure </h2>
+
+<p> Using all four columns of the Iris data set (sepal &amp; petal width &amp; length), one can attempt to see how well clusters correlate to the three iris species, <i>Setosa</i>, <i> Versicolor</i>, and <i>Virginica</i>.</p>
+
+<p> First, we can use the k-means algorithm. My implementation is very similar to the above, except all dimensions and all clusters have the same variance, and all correlations are removed.</p>
+
+
+<div id="kmeans_img_div">
+<img src="figure/kmeans_example.gif" id="kmeans_img_div" alt="kmeans clustering example"/>
+</div>
+
+
+<!--begin.rcode iris-kmeans, echo=FALSE, warning=FALSE, message=FALSE, fig.show='hide'
+set.seed(2018)
+invisible({iris.model_kmeans = generative_model(iris[,1:4], n_groups=3, covariance_constraint='unit',
+                                  covariance_across_classes='constant', record_history=TRUE,
+                                  n_iter=12)})
+
+invisible({p = base.animated.multiplot(iris.model_kmeans) +
+  ggtitle("K-Means Generative Model on Iris Dataset, iteration #",
+          subtitle='95% confidence ellipses based on equal variance among all clusters and dimensions') +
+  xlab('value 1') + ylab('value 2') + 
+  scale_fill_discrete('Cluster') + scale_color_discrete('Cluster')})
+
+invisible(gganimate(p, title_frame=TRUE, filename='figure/kmeans_example.gif',saver='gif',
+          ani.width=720, ani.height=720))
+
+kable(table(iris$Species, iris.model_kmeans$classes), format='html', rownames=TRUE,
+      caption="The clustering algorithm can perfectly isolate the Setosa species, and does a decent job of separating Versicolor and Virginica")
+
+end.rcode-->
+
+<p> The clusters seem to do a fairly good job of isolating the different species, even though the species was never used at all to create the clusters. </p>
+
+<p> If we relax our constraints, we can see the cluster shapes become more useful in describing correlations. </p>
+
+<div id="model_img1_div">
+<img src="figure/model_example_01.gif" id="model_img1" alt="model clustering example"/>
+</div>
+
+
+<!--begin.rcode iris-norm1, echo=FALSE, warning=FALSE, message=FALSE, fig.show='hide'
+set.seed(2018)
+invisible({iris.model_constant = generative_model(iris[,1:4], n_groups=3, covariance_constraint='free_diagonal', covariance_across_classes='constant', record_history=TRUE)})
+
+invisible({p = base.animated.multiplot(iris.model_constant) +
+  ggtitle("Normal Distribution Generative Model on Iris Dataset, iteration #",
+          subtitle='95% confidence ellipses based on equal variance among all clusters, unique per dimension') +
+  xlab('value 1') + ylab('value 2') + 
+  scale_fill_discrete('Cluster') + scale_color_discrete('Cluster')})
+
+invisible(gganimate(p, title_frame=TRUE, filename='figure/model_example_01.gif',saver='gif',
+          ani.width=720, ani.height=720))
+
+kable(table(iris$Species, iris.model_constant$classes), format='html', rownames=TRUE,
+      caption="The clustering algorithm can perfectly isolate the Setosa species, and does a decent job of separating Versicolor and Virginica")
+
+end.rcode-->
+
+<p> The clustering almost perfectly isolates each of the species, and this is a completely unsupervised model!. This model doesn't assume that each variable has the same variance, which is a pretty safe assumption. It only calculates one variance per variable, though, which does not add much complexity to the model.</p>
+
+<br/>
+<div id="model_img2_div">
+<img src="figure/model_example_02.gif" id="model_img2" alt="free-diagonal modeling clustering example"/>
+</div>
+
+<!--begin.rcode iris-norm2, echo=FALSE, warning=FALSE, message=FALSE, fig.show='hide'
+set.seed(2018)
+invisible({iris.model_diagonal = generative_model(iris[,1:4], n_groups=3,
+                                       record_history=TRUE)})
+
+invisible({p = base.animated.multiplot(iris.model_diagonal) +
+  ggtitle("Normal Distribution Generative Model on Iris Dataset, iteration #",
+          subtitle='95% confidence ellipses based on different variances between clusters and dimensions') +
+  xlab('value 1') + ylab('value 2') + 
+  scale_fill_discrete('Cluster') + scale_color_discrete('Cluster')})
+
+invisible(gganimate(p, title_frame=TRUE, filename='figure/model_example_02.gif',saver='gif',
+          ani.width=720, ani.height=720))
+
+kable(table(iris$Species, iris.model_diagonal$classes), format='html', rownames=TRUE,
+      caption="The clustering algorithm can perfectly isolate the Setosa species, and does a decent job of separating Versicolor and Virginica")
+
+end.rcode-->
+
+<p> Here we allow the variances to vary across variables <i>and</i> clusters. This does have the consequence of some clusters partially engulfing other clusters, though. While this may be appropriate in some situations, there's no reason to believe that the distributions of variables should have vastly different shapes between clusters. </p>
+
+<p> The fact that the clusters correlate less with the underlying class suggests that this model is not as good as describing the underlying structure of the data as the previous model.</p>
+
+<br/>
+
+<div id="model_img3_div">
+<img src="figure/model_example_03.gif" id="model_img3" alt="unconstrained clustering example"/>
+</div>
+
+<!--begin.rcode iris-norm3, echo=FALSE, warning=FALSE, message=FALSE, fig.show='hide'
+set.seed(2018)
+invisible({iris.model_free = generative_model(iris[,1:4], n_groups=3, covariance_constraint='free',
+                                   record_history=TRUE)})
+
+invisible({p = base.animated.multiplot(iris.model_free) +
+  ggtitle("Normal Distribution Generative Model on Iris Dataset, iteration #",
+          subtitle='95% confidence ellipses based on unconstrained covariances within clusters and between variables') +
+  xlab('value 1') + ylab('value 2') + 
+  scale_fill_discrete('Cluster') + scale_color_discrete('Cluster')})
+
+invisible(gganimate(p, title_frame=TRUE, filename='figure/model_example_03.gif',saver='gif',
+          ani.width=720, ani.height=720))
+
+kable(table(iris$Species, iris.model_free$classes), format='html', rownames=TRUE,
+      caption="The clustering algorithm can perfectly isolate the Setosa species, and does a decent job of separating Versicolor and Virginica")
+
+end.rcode-->
+
+<p> It is interesting to see that when one adds more degrees of freedom (in this case correlations) the algorithm becomes more unstable. You can see this from the ellipses reaching across clusters, since the high correlations fail to penalize distance as much. And the <i>Setosa</i> label becomes muddled with other species, making it the worst-performing clustering algorithm.</p>
+
+<h2> Evaluating Cluster Quality </h2>
+<p> How does one measure the quality of the clusters above? The simplest way to evaluate the quality of clusters like these that have underlying probabilities attached to them is to calculate their <a href="https://en.wikipedia.org/wiki/Deviance_(statistics)" id="wiki_deviance_out" target="_blank">deviance</a>.</p>
+
+<p> The deviance is simply <code> -2 * log(model_likelihood) </code>, where the model likelihood is simply the product of all of the probabilities (for categorical variables)/probability densities (for numeric variables) for each assignment. The higher the deviance, the worse the fit. Below are the deviances for the different models shown above:</p>
+
+<!--begin.rcode deviance-calc, warning=FALSE, message=FALSE
+generative.deviance <- function(model, use_density=TRUE, epsilon=1e-14){
+  if (use_density)
+    return(-2 * sum ( log(pmax(epsilon, apply(model$prob_densities, 1, max)))))
+  else
+    return(-2 * sum ( log(apply(model$probs, 1, max))))
+}
+#k-means clustering
+generative.deviance(iris.model_kmeans)
+#clustering with different variances per parameter
+generative.deviance(iris.model_constant)
+#clustering with different variances per parameter and cluster
+generative.deviance(iris.model_diagonal)
+#clustering with no restrictions on covariances
+generative.deviance(iris.model_free) 
+end.rcode-->
+
+<p> It looks like the third and fourth model have the lowest deviances, which is expected.</p>
+
+<h2> Fixing Poorly Fit Cluster </h2>
+<p>  One thing that can be done to fix poorly fit clusters is to just keep on trying different random starting values until you get a desirable result. Since deviance is a quick and easy measure, we can try, say, 51 different iterations for the most complicated model and see if any of the results have a better deviance than the second model's.</p>
+
+<!--begin.rcode better-cluster, warning=FALSE, message=FALSE
+best_deviance = Inf
+best_seed = -1
+best.model = NULL
+
+for (seed in 2000:2050){
+  set.seed(seed)
+  gen.model = generative_model(iris[,1:4], 
+                               n_groups=3, 
+                               covariance_constraint='free', 
+                               record_history=TRUE)
+  dev = generative.deviance(gen.model)
+  if (dev < best_deviance){
+    best_deviance = dev
+    best_seed = seed
+    best.model = gen.model
+  }
+}
+print(best_deviance)
+print(best_seed)
+end.rcode-->
+
+<p> It looks like the best deviance is about 0.8, which is 5 times lower than the previoius best. Let's see how this model was created!</p>
+
+<div id="model_img4_div">
+<img src="figure/model_example_04.gif" id="model_img4" alt="'best' clustering example"/>
+</div>
+
+
+<!--begin.rcode iris-norm4, echo=FALSE, warning=FALSE, message=FALSE, fig.show='hide'
+
+
+invisible({p = base.animated.multiplot(best.model) +
+  ggtitle("Normal Distribution Generative Model on Iris Dataset, iteration #",
+          subtitle='95% confidence ellipses based on model with best deviance') +
+  xlab('value 1') + ylab('value 2') + 
+  scale_fill_discrete('Cluster') + scale_color_discrete('Cluster')})
+
+invisible(gganimate(p, title_frame=TRUE, filename='figure/model_example_04.gif',saver='gif',
+          ani.width=720, ani.height=720))
+
+kable(table(iris$Species, best.model$classes), format='html', rownames=TRUE,
+      caption="The clustering algorithm can perfectly isolate the Setosa species, and does a decent job of separating Versicolor and Virginica")
+
+end.rcode-->
+
+<p> It appears as if the "best" model did not really describe the structure very well. It mostly isolated <i>Setosa</i>, but almost all of <i>Virginica</i> and <i>Versicolor</i> are together, with a remaining sliver of points being in cluster 3, which is a definite example of overfitting in unsupervised learning. There is no reason to believe that such a small, elongated cluster should have any meaning in this context.</p>
+
+<p> Moral of the story: simpler structures in data tend to be more meaningful than complex ones. </p>
+
+<h2> GitHub Code </h2>
+
+<p> All of the code for generating this article and its images can be found at <a href="https://github.com/mcandocia/generative-clustering" id="github_generative_clustering_out" target="_blank">https://github.com/mcandocia/generative_clustering</a>.</p>
